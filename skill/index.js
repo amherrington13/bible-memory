@@ -140,9 +140,14 @@ const handlers = {
                 let scriptureRes = res.data.text;
                 console.log(vm);
                 console.log(scriptureRes);
+
                 if (Object.keys(vm.attributes).length === 0) { // Check if it's the first time the skill has been invoked
 
                     var originArray = scriptureRes.split(' ');
+
+                    if (originArray.length <= 2) {
+                        vm.emit(':tell', 'This is too short of a verse');
+                    }
 
                     var dynamodb = new AWS.DynamoDB({apiVersion: '2012-08-10'});
                     var params = {
@@ -157,6 +162,8 @@ const handlers = {
                                 N: "3"
                             }, "currentPosition": {
                                 N: "2"
+                            }, "tryCounter": {
+                                N: "0"
                             }
 
                         },
@@ -181,6 +188,9 @@ const handlers = {
     NextWordIntent: function () {
         let resObject = this.event.request.intent.slots;
         let nextWord = resObject.NextWord.value;
+
+        console.log('Next word: ' + nextWord);
+        console.log('Response: ' + this);
 
         var dynamodb = new AWS.DynamoDB({apiVersion: '2012-08-10'});
         var params = {
@@ -207,6 +217,12 @@ const handlers = {
                     let currentPos = parseInt(data.Item.currentPosition.N);
                     let verseLength = originArray.length;
                     let indexLength = verseLength - 1;
+                    let responseText = '';
+
+                    if (data.Item.tryCounter >= 3) {
+                        responseText = nextWord + ' and ';
+                        // vm.emit(':ask', nextWord + ' and ' + originArray[currentPos + 1]);
+                    }
 
                     if ((indexLength - currentPos) <= 0) {
                         vm.emit(':tell', 'You did it!');
@@ -232,6 +248,8 @@ const handlers = {
                                     N: nextPosition.toString()
                                 }, "currentPosition": {
                                     N: (nextPosition - 1).toString()
+                                }, "tryCounter": {
+                                    N: parseInt(data.Item.tryCounter.N)
                                 }
                             },
                             TableName: "c4tk-biblememory-session"
@@ -250,7 +268,7 @@ const handlers = {
                                 //     vm.emit(':tell', 'You did it!')
                                 // }
                                 // else {
-                                    vm.emit(':ask', originArray[nextPosition - 3] + ' ' + originArray[nextPosition - 2]);
+                                    vm.emit(':ask', responseText + originArray[nextPosition - 3] + ' ' + originArray[nextPosition - 2]);
                                 // }
 
                             }
@@ -259,6 +277,42 @@ const handlers = {
 
 
                 } else {
+                    let originArray = data.Item.originText.S.split(' ');
+                    let nextPosition = parseInt(data.Item.nextPosition.N) + 3;
+
+                    console.log(vm.event.session.sessionId);
+                    console.log(data.Item.originText.S);
+                    console.log(originArray[nextPosition]);
+                    console.log(nextPosition);
+                    let currentPos = parseInt(data.Item.currentPosition.N);
+                    let verseLength = originArray.length;
+                    let indexLength = verseLength - 1;
+                    let responseText = '';
+                    let params = {
+                        Item: {
+                            "sessionId": {
+                                S: vm.event.session.sessionId
+                            }, "originText": {
+                                S: data.Item.originText.S
+                            }, "answer": {
+                                S: originArray[nextPosition - 1].replace(/[.,\/#!$%\^&\*;:{}=_`~()]/g, "")
+                            }, "nextPosition": {
+                                N: nextPosition.toString()
+                            }, "currentPosition": {
+                                N: (nextPosition - 1).toString()
+                            }, "tryCounter": {
+                                N: parseInt(data.Item.tryCounter.N) + 1
+                            }
+                        },
+                        TableName: "c4tk-biblememory-session"
+                    };
+                    dynamodb.putItem(params, function (err, data) {
+
+                        if (err) console.log(err, err.stack); // an error occurred
+                        else {
+                            console.log('Try failed: ' + data);
+                        }
+                    });
                     vm.emit(':ask', "Try again");
                 }
             }
